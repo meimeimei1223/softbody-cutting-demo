@@ -25,7 +25,8 @@ An interactive WebGL-based physics simulation showcasing real-time soft body def
 
 ## 🚀 Live Demo
 
-[**Launch Interactive Demo →**](demo.html)
+- [**Original Demo**](demo.html) - Classic version with core functionality
+- [**New Enhanced Demo**](newdemo.html) - Latest version with improved features and performance
 
 ## 🎮 Controls
 
@@ -134,6 +135,16 @@ The simulation consists of several key components:
 - **Scalable**: Adjustable substep count for performance tuning
 - **Efficient**: Optimized constraint solving and mesh updates
 - **Responsive**: Low-latency user interaction
+
+## 🆕 New Enhanced Demo Features
+
+The new demo (`newdemo.html`) includes additional improvements and optimizations:
+
+- Enhanced visual interface and user experience
+- Improved performance optimizations
+- Additional interactive features
+- Refined physics simulation parameters
+- Better error handling and stability
 
 ## 🔮 Future Enhancements
 
