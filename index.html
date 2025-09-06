@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Soft Body Deformation & Cutting Demo</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .container {
+            text-align: center;
+            max-width: 800px;
+            padding: 40px 20px;
+        }
+        
+        .title {
+            font-size: 3.5rem;
+            font-weight: 300;
+            margin-bottom: 1rem;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        
+        .subtitle {
+            font-size: 1.5rem;
+            opacity: 0.8;
+            margin-bottom: 3rem;
+            font-weight: 300;
+        }
+        
+        .description {
+            font-size: 1.1rem;
+            line-height: 1.6;
+            margin-bottom: 3rem;
+            opacity: 0.9;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
+        .demo-button {
+            display: inline-block;
+            padding: 15px 40px;
+            font-size: 1.2rem;
+            font-weight: 500;
+            color: #2a5298;
+            background: white;
+            text-decoration: none;
+            border-radius: 50px;
+            transition: all 0.3s ease;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+        }
+        
+        .demo-button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 12px 35px rgba(0, 0, 0, 0.3);
+        }
+        
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+            margin-top: 4rem;
+            max-width: 800px;
+        }
+        
+        .feature {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2rem;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .feature h3 {
+            margin-top: 0;
+            font-size: 1.3rem;
+            margin-bottom: 1rem;
+        }
+        
+        .feature p {
+            font-size: 1rem;
+            opacity: 0.9;
+            line-height: 1.5;
+        }
+        
+        @media (max-width: 768px) {
+            .title {
+                font-size: 2.5rem;
+            }
+            
+            .subtitle {
+                font-size: 1.2rem;
+            }
+            
+            .container {
+                padding: 20px 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="title">Soft Body Deformation & Cutting Demo</h1>
+        <p class="subtitle">Interactive Physics Simulation in WebGL</p>
+        
+        <div class="description">
+            Experience real-time soft body physics with advanced deformation and cutting mechanics. 
+            This interactive demo features tetrahedral mesh simulation with multiple interaction modes 
+            including deformation, cutting, anchoring, and smoothing operations.
+        </div>
+        
+        <a href="demo.html" class="demo-button">Launch Interactive Demo</a>
+        
+        <div class="features">
+            <div class="feature">
+                <h3>🎯 Deform Mode</h3>
+                <p>Click and drag to deform the soft body mesh with realistic physics response</p>
+            </div>
+            
+            <div class="feature">
+                <h3>✂️ Cut Mode</h3>
+                <p>Slice through the mesh with precise tetrahedral cutting algorithms</p>
+            </div>
+            
+            <div class="feature">
+                <h3>⚓ Anchor Mode</h3>
+                <p>Pin vertices in place to create fixed constraint points</p>
+            </div>
+            
+            <div class="feature">
+                <h3>✨ Smooth Mode</h3>
+                <p>Apply smoothing operations to refine mesh geometry</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
