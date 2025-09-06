@@ -1,0 +1,1543 @@
+<!DOCTYPE html>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<html lang="en">
+	<head>
+		<title>Complete Soft Body System with Cutting & Anchors</title>
+		<style>
+			body {
+				font-family: verdana; 
+				font-size: 15px;
+			}			
+			.button {
+				background-color: #606060;
+				border: none;
+				color: white;
+				padding: 15px 32px;
+				font-size: 16px;
+				margin: 4px 2px;
+				cursor: pointer;
+			}
+			.mode-button {
+				background-color: #404040;
+				border: 2px solid #808080;
+				color: white;
+				padding: 10px 20px;
+				font-size: 14px;
+				margin: 2px;
+				cursor: pointer;
+				border-radius: 5px;
+			}
+			.mode-button.active {
+				background-color: #608040;
+				border-color: #80a060;
+			}
+			.mode-info {
+				color: #333;
+				font-weight: bold;
+				margin: 10px 0;
+			}
+		</style>	
+	</head>
+	
+	<body>
+
+        <h1>Complete Soft Body System with Cutting & Anchors</h1> 
+		
+		<!-- Mode Selection -->
+		<div class="mode-selector">
+			<button id="modeDeform" class="mode-button active" onclick="switchMode('deform')">Deform</button>
+			<button id="modeCut" class="mode-button" onclick="switchMode('cut')">Cut</button>
+			<button id="modeAnchor" class="mode-button" onclick="switchMode('anchor')">Anchor</button>
+		</div>
+		<div id="modeInfo" class="mode-info">Mode: Deform | Anchors: 0/3</div>
+		<div style="font-size: 12px; color: #666; margin: 5px 0;">
+			<b>Deform:</b> Drag anchors/body | <b>Cut:</b> LMB=move, RMB=rotate, Both=scale | <b>Anchor:</b> Click to place (max 3)
+		</div>
+		
+		<!-- Action Buttons -->
+		<button id = "buttonRun" onclick="run()" class="button">Run</button>
+		<button onclick="restart()" class="button">Restart</button>
+		<button onclick="squash()" class="button">Squash</button>
+		<button onclick="newBody()" class="button">Bodies++</button>
+		<button id="cutExecute" onclick="performCutWithAnchors()" class="button" style="display:none">Execute Cut</button>
+		<button onclick="clearAllAnchors()" class="button">Clear Anchors</button>&nbsp;&nbsp;
+		<br><br>
+		<span id = "numTets">0</span> tets&nbsp;&nbsp;
+		Compliance:
+		<input type = "range" min = "0" max = "10" value = "0" id = "complianceSlider" class = "slider"> 
+
+		<br><br>		
+        <div id="container"></div>
+        
+        <script src="https://unpkg.com/three@0.139.2/build/three.min.js"></script>
+        <script src="https://unpkg.com/three@0.139.2/examples/js/controls/OrbitControls.js"></script>
+		<script>
+
+			// ----- math on vector arrays -------------------------------------------------------------
+
+			function vecSetZero(a,anr) {
+				anr *= 3;
+				a[anr++] = 0.0;
+				a[anr++] = 0.0;
+				a[anr]   = 0.0;
+			}
+
+			function vecScale(a,anr, scale) {
+				anr *= 3;
+				a[anr++] *= scale;
+				a[anr++] *= scale;
+				a[anr]   *= scale;
+			}
+
+			function vecCopy(a,anr, b,bnr) {
+				anr *= 3; bnr *= 3;
+				a[anr++] = b[bnr++]; 
+				a[anr++] = b[bnr++]; 
+				a[anr]   = b[bnr];
+			}
+			
+			function vecAdd(a,anr, b,bnr, scale = 1.0) {
+				anr *= 3; bnr *= 3;
+				a[anr++] += b[bnr++] * scale; 
+				a[anr++] += b[bnr++] * scale; 
+				a[anr]   += b[bnr] * scale;
+			}
+
+			function vecSetDiff(dst,dnr, a,anr, b,bnr, scale = 1.0) {
+				dnr *= 3; anr *= 3; bnr *= 3;
+				dst[dnr++] = (a[anr++] - b[bnr++]) * scale;
+				dst[dnr++] = (a[anr++] - b[bnr++]) * scale;
+				dst[dnr]   = (a[anr] - b[bnr]) * scale;
+			}
+
+			function vecLengthSquared(a,anr) {
+				anr *= 3;
+				let a0 = a[anr], a1 = a[anr + 1], a2 = a[anr + 2];
+				return a0 * a0 + a1 * a1 + a2 * a2;
+			}
+
+			function vecDistSquared(a,anr, b,bnr) {
+				anr *= 3; bnr *= 3;
+				let a0 = a[anr] - b[bnr], a1 = a[anr + 1] - b[bnr + 1], a2 = a[anr + 2] - b[bnr + 2];
+				return a0 * a0 + a1 * a1 + a2 * a2;
+			}	
+
+			function vecDot(a,anr, b,bnr) {
+				anr *= 3; bnr *= 3;
+				return a[anr] * b[bnr] + a[anr + 1] * b[bnr + 1] + a[anr + 2] * b[bnr + 2];
+			}	
+
+			function vecSetCross(a,anr, b,bnr, c,cnr) {
+				anr *= 3; bnr *= 3; cnr *= 3;
+				a[anr++] = b[bnr + 1] * c[cnr + 2] - b[bnr + 2] * c[cnr + 1];
+				a[anr++] = b[bnr + 2] * c[cnr + 0] - b[bnr + 0] * c[cnr + 2];
+				a[anr]   = b[bnr + 0] * c[cnr + 1] - b[bnr + 1] * c[cnr + 0];
+			}			
+			
+			var gThreeScene;
+			var gRenderer;
+			var gCamera;
+			var gCameraControl;
+			var gGrabber;
+			var gMouseDown = false;
+
+			// Interaction Mode System
+			var InteractionMode = {
+				DEFORM: 'deform',
+				CUT: 'cut',
+				ANCHOR: 'anchor'
+			};
+
+			var gInteractionState = {
+				currentMode: InteractionMode.DEFORM,
+				anchorPoints: [],      
+				cutterObject: null,    
+				bunnyMesh: null       
+			};
+
+			// ------------------------------------------------------------------
+
+			var gPhysicsScene = 
+			{
+				gravity : [0.0, -10.0, 0.0],
+				dt : 1.0 / 120.0,
+				numSubsteps : 10,
+				paused: true,
+				objects: [],				
+			};
+
+			// MeshCutting namespace - JavaScript port of C++ implementation
+			var MeshCutting = {
+				getVector3FromArray: function(array, index) {
+					return new THREE.Vector3(
+						array[index * 3],
+						array[index * 3 + 1],
+						array[index * 3 + 2]
+					);
+				},
+
+				triangleSegmentIntersect: function(p1, p2, p3, q1, q2) {
+					var d = q2.clone().sub(q1);
+					var e1 = p2.clone().sub(p1);
+					var e2 = p3.clone().sub(p1);
+					var h = d.clone().cross(e2);
+					var a = e1.dot(h);
+
+					if (a > -0.00001 && a < 0.00001) return false;
+
+					var f = 1.0 / a;
+					var s = q1.clone().sub(p1);
+					var u = f * s.dot(h);
+
+					if (u < 0.0 || u > 1.0) return false;
+
+					var q = s.clone().cross(e1);
+					var v = f * d.dot(q);
+
+					if (v < 0.0 || u + v > 1.0) return false;
+
+					var t = f * e2.dot(q);
+					return (t > 0.00001 && t < 0.99999);
+				},
+
+				pointInTetrahedron: function(p, a, b, c, d) {
+					var sign = function(p1, p2, p3, p4) {
+						var v1 = p2.clone().sub(p1);
+						var v2 = p3.clone().sub(p1);
+						var v3 = p4.clone().sub(p1);
+						return v1.clone().cross(v2).dot(v3);
+					};
+
+					var d0 = sign(p, a, b, c);
+					var d1 = sign(p, a, c, d);
+					var d2 = sign(p, a, d, b);
+					var d3 = sign(p, b, d, c);
+
+					var hasNeg = (d0 < 0) || (d1 < 0) || (d2 < 0) || (d3 < 0);
+					var hasPos = (d0 > 0) || (d1 > 0) || (d2 > 0) || (d3 > 0);
+
+					return !(hasNeg && hasPos);
+				},
+
+				aabbIntersect: function(min1, max1, min2, max2) {
+					return (min1.x <= max2.x && max1.x >= min2.x) &&
+						   (min1.y <= max2.y && max1.y >= min2.y) &&
+						   (min1.z <= max2.z && max1.z >= min2.z);
+				},
+
+				computeTetrahedronAABB: function(a, b, c, d) {
+					var minPoint = new THREE.Vector3(
+						Math.min(a.x, b.x, c.x, d.x),
+						Math.min(a.y, b.y, c.y, d.y),
+						Math.min(a.z, b.z, c.z, d.z)
+					);
+					var maxPoint = new THREE.Vector3(
+						Math.max(a.x, b.x, c.x, d.x),
+						Math.max(a.y, b.y, c.y, d.y),
+						Math.max(a.z, b.z, c.z, d.z)
+					);
+					return {min: minPoint, max: maxPoint};
+				},
+
+				tetrahedronsIntersect: function(a1, b1, c1, d1, a2, b2, c2, d2) {
+					var aabb1 = this.computeTetrahedronAABB(a1, b1, c1, d1);
+					var aabb2 = this.computeTetrahedronAABB(a2, b2, c2, d2);
+
+					if (!this.aabbIntersect(aabb1.min, aabb1.max, aabb2.min, aabb2.max)) {
+						return false;
+					}
+
+					if (this.pointInTetrahedron(a1, a2, b2, c2, d2) ||
+						this.pointInTetrahedron(b1, a2, b2, c2, d2) ||
+						this.pointInTetrahedron(c1, a2, b2, c2, d2) ||
+						this.pointInTetrahedron(d1, a2, b2, c2, d2)) {
+						return true;
+					}
+
+					if (this.pointInTetrahedron(a2, a1, b1, c1, d1) ||
+						this.pointInTetrahedron(b2, a1, b1, c1, d1) ||
+						this.pointInTetrahedron(c2, a1, b1, c1, d1) ||
+						this.pointInTetrahedron(d2, a1, b1, c1, d1)) {
+						return true;
+					}
+
+					var edges1 = [
+						{a: a1, b: b1}, {a: a1, b: c1}, {a: a1, b: d1},
+						{a: b1, b: c1}, {a: b1, b: d1}, {a: c1, b: d1}
+					];
+
+					var faces2 = [
+						{a: a2, b: b2, c: c2}, {a: a2, b: b2, c: d2},
+						{a: a2, b: c2, c: d2}, {a: b2, b: c2, c: d2}
+					];
+
+					for (var i = 0; i < edges1.length; i++) {
+						for (var j = 0; j < faces2.length; j++) {
+							if (this.triangleSegmentIntersect(
+								faces2[j].a, faces2[j].b, faces2[j].c,
+								edges1[i].a, edges1[i].b)) {
+								return true;
+							}
+						}
+					}
+
+					var edges2 = [
+						{a: a2, b: b2}, {a: a2, b: c2}, {a: a2, b: d2},
+						{a: b2, b: c2}, {a: b2, b: d2}, {a: c2, b: d2}
+					];
+
+					var faces1 = [
+						{a: a1, b: b1, c: c1}, {a: a1, b: b1, c: d1},
+						{a: a1, b: c1, c: d1}, {a: b1, b: c1, c: d1}
+					];
+
+					for (var i = 0; i < edges2.length; i++) {
+						for (var j = 0; j < faces1.length; j++) {
+							if (this.triangleSegmentIntersect(
+								faces1[j].a, faces1[j].b, faces1[j].c,
+								edges2[i].a, edges2[i].b)) {
+								return true;
+							}
+						}
+					}
+
+					return false;
+				},
+
+				findIntersectingTetrahedra: function(cutterMesh, targetMesh) {
+					var intersectingIndices = [];
+
+					for (var i = 0; i < cutterMesh.tetIds.length / 4; i++) {
+						var cut_v0 = this.getVector3FromArray(cutterMesh.verts, cutterMesh.tetIds[i * 4]);
+						var cut_v1 = this.getVector3FromArray(cutterMesh.verts, cutterMesh.tetIds[i * 4 + 1]);
+						var cut_v2 = this.getVector3FromArray(cutterMesh.verts, cutterMesh.tetIds[i * 4 + 2]);
+						var cut_v3 = this.getVector3FromArray(cutterMesh.verts, cutterMesh.tetIds[i * 4 + 3]);
+
+						for (var j = 0; j < targetMesh.tetIds.length / 4; j++) {
+							var tet_v0 = this.getVector3FromArray(targetMesh.verts, targetMesh.tetIds[j * 4]);
+							var tet_v1 = this.getVector3FromArray(targetMesh.verts, targetMesh.tetIds[j * 4 + 1]);
+							var tet_v2 = this.getVector3FromArray(targetMesh.verts, targetMesh.tetIds[j * 4 + 2]);
+							var tet_v3 = this.getVector3FromArray(targetMesh.verts, targetMesh.tetIds[j * 4 + 3]);
+
+							if (this.tetrahedronsIntersect(
+								cut_v0, cut_v1, cut_v2, cut_v3,
+								tet_v0, tet_v1, tet_v2, tet_v3)) {
+								intersectingIndices.push(j);
+							}
+						}
+					}
+
+					return [...new Set(intersectingIndices)].sort((a, b) => a - b);
+				},
+
+				getOutwardTriangleWinding: function(tetVerts, faceVerts, verts) {
+					var fourthVertex = -1;
+					for (var i = 0; i < 4; i++) {
+						if (tetVerts[i] !== faceVerts[0] && 
+							tetVerts[i] !== faceVerts[1] && 
+							tetVerts[i] !== faceVerts[2]) {
+							fourthVertex = tetVerts[i];
+							break;
+						}
+					}
+					
+					if (fourthVertex === -1) return faceVerts;
+					
+					var p0 = this.getVector3FromArray(verts, faceVerts[0]);
+					var p1 = this.getVector3FromArray(verts, faceVerts[1]);
+					var p2 = this.getVector3FromArray(verts, faceVerts[2]);
+					var p4 = this.getVector3FromArray(verts, fourthVertex);
+					
+					var v1 = p1.clone().sub(p0);
+					var v2 = p2.clone().sub(p0);
+					var normal = v1.clone().cross(v2);
+					var toFourth = p4.clone().sub(p0);
+					
+					if (normal.dot(toFourth) > 0) {
+						return [faceVerts[0], faceVerts[2], faceVerts[1]];
+					} else {
+						return [faceVerts[0], faceVerts[1], faceVerts[2]];
+					}
+				},
+
+				cutTetrahedralMesh: function(originalMesh, tetsToRemove) {
+					var resultMesh = {
+						verts: originalMesh.verts.slice(),
+						tetIds: [],
+						tetEdgeIds: [],
+						tetSurfaceTriIds: []
+					};
+
+					if (tetsToRemove.length === 0) {
+						return originalMesh;
+					}
+
+					var tetsToRemoveSet = new Set(tetsToRemove);
+
+					for (var i = 0; i < originalMesh.tetIds.length / 4; i++) {
+						if (!tetsToRemoveSet.has(i)) {
+							resultMesh.tetIds.push(originalMesh.tetIds[i * 4]);
+							resultMesh.tetIds.push(originalMesh.tetIds[i * 4 + 1]);
+							resultMesh.tetIds.push(originalMesh.tetIds[i * 4 + 2]);
+							resultMesh.tetIds.push(originalMesh.tetIds[i * 4 + 3]);
+						}
+					}
+
+					var faceInfo = new Map();
+					var tetFaceMap = new Map();
+
+					for (var i = 0; i < resultMesh.tetIds.length / 4; i++) {
+						var v0 = resultMesh.tetIds[i * 4];
+						var v1 = resultMesh.tetIds[i * 4 + 1];
+						var v2 = resultMesh.tetIds[i * 4 + 2];
+						var v3 = resultMesh.tetIds[i * 4 + 3];
+						var tetVerts = [v0, v1, v2, v3];
+
+						var addFace = (function(tetIndex, tetVertices) {
+							return function(a, b, c, origOrder) {
+								var sorted = [a, b, c].sort((x, y) => x - y);
+								var key = sorted[0] + ',' + sorted[1] + ',' + sorted[2];
+								if (!faceInfo.has(key)) {
+									faceInfo.set(key, {count: 0, order: []});
+									tetFaceMap.set(key, {tetVerts: tetVertices, faceVerts: [a, b, c]});
+								}
+								faceInfo.get(key).count++;
+								faceInfo.get(key).order = origOrder;
+							};
+						})(i, tetVerts);
+
+						addFace(v0, v1, v2, [v0, v1, v2]);
+						addFace(v0, v1, v3, [v0, v1, v3]);
+						addFace(v0, v2, v3, [v0, v2, v3]);
+						addFace(v1, v2, v3, [v1, v2, v3]);
+					}
+
+					for (var [key, info] of faceInfo) {
+						if (info.count === 1) {
+							var tetFaceInfo = tetFaceMap.get(key);
+							if (tetFaceInfo) {
+								var correctWinding = this.getOutwardTriangleWinding(
+									tetFaceInfo.tetVerts, 
+									tetFaceInfo.faceVerts, 
+									resultMesh.verts
+								);
+								
+								resultMesh.tetSurfaceTriIds.push(correctWinding[0]);
+								resultMesh.tetSurfaceTriIds.push(correctWinding[1]);
+								resultMesh.tetSurfaceTriIds.push(correctWinding[2]);
+							} else {
+								resultMesh.tetSurfaceTriIds.push(info.order[0]);
+								resultMesh.tetSurfaceTriIds.push(info.order[1]);
+								resultMesh.tetSurfaceTriIds.push(info.order[2]);
+							}
+						}
+					}
+
+					var edgeSet = new Set();
+					for (var i = 0; i < resultMesh.tetIds.length / 4; i++) {
+						var v0 = resultMesh.tetIds[i * 4];
+						var v1 = resultMesh.tetIds[i * 4 + 1];
+						var v2 = resultMesh.tetIds[i * 4 + 2];
+						var v3 = resultMesh.tetIds[i * 4 + 3];
+
+						edgeSet.add(Math.min(v0, v1) + ',' + Math.max(v0, v1));
+						edgeSet.add(Math.min(v0, v2) + ',' + Math.max(v0, v2));
+						edgeSet.add(Math.min(v0, v3) + ',' + Math.max(v0, v3));
+						edgeSet.add(Math.min(v1, v2) + ',' + Math.max(v1, v2));
+						edgeSet.add(Math.min(v1, v3) + ',' + Math.max(v1, v3));
+						edgeSet.add(Math.min(v2, v3) + ',' + Math.max(v2, v3));
+					}
+
+					for (var edge of edgeSet) {
+						var vertices = edge.split(',').map(Number);
+						resultMesh.tetEdgeIds.push(vertices[0]);
+						resultMesh.tetEdgeIds.push(vertices[1]);
+					}
+
+					console.log("Cut complete! Removed " + tetsToRemove.length + " tetrahedra");
+					return resultMesh;
+				}
+			};
+
+			// AnchorPoint class for fixed vertices with grab capability
+			class AnchorPoint {
+				constructor(position, particleIndex, softBody) {
+					this.position = position.clone();
+					this.particleIndex = particleIndex;
+					this.softBody = softBody;
+					this.grabOffset = new THREE.Vector3();
+					
+					this.originalInvMass = softBody.invMass[particleIndex];
+					
+					var geometry = new THREE.SphereGeometry(0.05, 16, 16);
+					var material = new THREE.MeshBasicMaterial({
+						color: 0xffff00,
+						transparent: true,
+						opacity: 0.8
+					});
+					this.sphere = new THREE.Mesh(geometry, material);
+					this.sphere.position.copy(position);
+					this.sphere.userData = this; // Enable grabbing
+					this.sphere.layers.enable(1); // Enable raycasting
+					gThreeScene.add(this.sphere);
+					
+					softBody.invMass[particleIndex] = 0.0;
+					console.log("Anchor placed at particle", particleIndex);
+				}
+				
+				remove() {
+					this.softBody.invMass[this.particleIndex] = this.originalInvMass;
+					gThreeScene.remove(this.sphere);
+					console.log("Anchor removed from particle", this.particleIndex);
+				}
+				
+				updatePosition() {
+					if (this.particleIndex < this.softBody.numParticles) {
+						this.position.set(
+							this.softBody.pos[this.particleIndex * 3],
+							this.softBody.pos[this.particleIndex * 3 + 1],
+							this.softBody.pos[this.particleIndex * 3 + 2]
+						);
+						this.sphere.position.copy(this.position);
+					}
+				}
+				
+				// Grab interface for anchor movement
+				startGrab(pos) {
+					this.grabOffset = pos.clone().sub(this.position);
+					console.log("Anchor grabbed for movement");
+				}
+				
+				moveGrabbed(pos, vel) {
+					// Update anchor position
+					this.position = pos.clone().sub(this.grabOffset);
+					this.sphere.position.copy(this.position);
+					
+					// Move the associated particle
+					this.softBody.pos[this.particleIndex * 3] = this.position.x;
+					this.softBody.pos[this.particleIndex * 3 + 1] = this.position.y;
+					this.softBody.pos[this.particleIndex * 3 + 2] = this.position.z;
+					
+					// Update mesh immediately for visual feedback
+					this.softBody.updateMeshes();
+				}
+				
+				endGrab() {
+					console.log("Anchor released at", this.position);
+				}
+			}
+
+			// CutterObject class with position, rotation, and scale controls
+			class CutterObject {
+				constructor() {
+					this.baseVerts = [...cutterMesh.verts];
+					this.position = new THREE.Vector3(0, 1.0, 0);
+					this.rotation = new THREE.Vector3(0, 0, 0); // Euler angles
+					this.scale = new THREE.Vector3(0.8, 0.3, 0.05);
+					this.grabOffset = new THREE.Vector3();
+					this.grabMode = 'translate'; // 'translate', 'rotate', 'scale'
+					this.initialMousePos = new THREE.Vector2();
+					this.initialScale = new THREE.Vector3();
+					this.initialRotation = new THREE.Vector3();
+					
+					var geometry = new THREE.BufferGeometry();
+					this.updateGeometry(geometry);
+					
+					var material = new THREE.MeshBasicMaterial({
+						color: 0xff0000,
+						wireframe: true,
+						transparent: true,
+						opacity: 0.6
+					});
+					
+					this.mesh = new THREE.Mesh(geometry, material);
+					this.mesh.userData = this;
+					this.mesh.layers.enable(1);
+					gThreeScene.add(this.mesh);
+					
+					console.log("CutterObject created with controls: LMB=move, RMB=rotate, Both=scale");
+				}
+				
+				updateGeometry(geometry) {
+					var verts = new Float32Array(this.baseVerts.length);
+					
+					// Create transformation matrix
+					var rotMatrix = new THREE.Matrix3();
+					var euler = new THREE.Euler(this.rotation.x, this.rotation.y, this.rotation.z);
+					rotMatrix.setFromMatrix4(new THREE.Matrix4().makeRotationFromEuler(euler));
+					
+					for (var i = 0; i < this.baseVerts.length; i += 3) {
+						// Apply scale first
+						var scaledVert = new THREE.Vector3(
+							this.baseVerts[i] * this.scale.x,
+							this.baseVerts[i+1] * this.scale.y,
+							this.baseVerts[i+2] * this.scale.z
+						);
+						
+						// Then rotation
+						scaledVert.applyMatrix3(rotMatrix);
+						
+						// Finally translation
+						verts[i] = scaledVert.x + this.position.x;
+						verts[i+1] = scaledVert.y + this.position.y;
+						verts[i+2] = scaledVert.z + this.position.z;
+					}
+					
+					geometry.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+					geometry.setIndex(cutterMesh.tetSurfaceTriIds);
+					geometry.computeVertexNormals();
+				}
+				
+				startGrab(pos, grabMode = 'translate') {
+					this.grabMode = grabMode;
+					this.grabOffset = pos.clone().sub(this.position);
+					this.initialScale.copy(this.scale);
+					this.initialRotation.copy(this.rotation);
+					console.log("Cutter grabbed in", grabMode, "mode");
+				}
+				
+				moveGrabbed(pos, vel, mousePos) {
+					switch(this.grabMode) {
+						case 'translate':
+							this.position = pos.clone().sub(this.grabOffset);
+							break;
+							
+						case 'rotate':
+							// Right-click rotation based on mouse movement
+							var deltaX = mousePos.x - this.initialMousePos.x;
+							var deltaY = mousePos.y - this.initialMousePos.y;
+							
+							this.rotation.y = this.initialRotation.y + deltaX * 0.01; // Y-axis rotation
+							this.rotation.x = this.initialRotation.x + deltaY * 0.01; // X-axis rotation
+							break;
+							
+						case 'scale':
+							// Both mouse buttons - uniform scaling based on Y movement
+							var deltaY = mousePos.y - this.initialMousePos.y;
+							var scaleFactor = 1.0 + deltaY * 0.003; // Scaling sensitivity
+							scaleFactor = Math.max(0.1, Math.min(3.0, scaleFactor)); // Limit scale range
+							
+							this.scale.copy(this.initialScale).multiplyScalar(scaleFactor);
+							break;
+					}
+					
+					this.updateGeometry(this.mesh.geometry);
+					this.mesh.geometry.attributes.position.needsUpdate = true;
+				}
+				
+				setInitialMousePos(mousePos) {
+					this.initialMousePos.copy(mousePos);
+				}
+				
+				endGrab() {
+					console.log("Cutter released - Position:", this.position, "Rotation:", this.rotation, "Scale:", this.scale);
+					this.grabMode = 'translate';
+				}
+				
+				getTransformedVerts() {
+					var verts = [];
+					var rotMatrix = new THREE.Matrix3();
+					var euler = new THREE.Euler(this.rotation.x, this.rotation.y, this.rotation.z);
+					rotMatrix.setFromMatrix4(new THREE.Matrix4().makeRotationFromEuler(euler));
+					
+					for (var i = 0; i < this.baseVerts.length; i += 3) {
+						var scaledVert = new THREE.Vector3(
+							this.baseVerts[i] * this.scale.x,
+							this.baseVerts[i+1] * this.scale.y,
+							this.baseVerts[i+2] * this.scale.z
+						);
+						
+						scaledVert.applyMatrix3(rotMatrix);
+						
+						verts.push(scaledVert.x + this.position.x);
+						verts.push(scaledVert.y + this.position.y);
+						verts.push(scaledVert.z + this.position.z);
+					}
+					return verts;
+				}
+				
+				setVisible(visible) {
+					this.mesh.visible = visible;
+				}
+			}
+
+			// ------------------------------------------------------------------
+			class SoftBody {
+				constructor(tetMesh, scene, edgeCompliance = 0.01, volCompliance = 0.0)
+				{
+					this.numParticles = tetMesh.verts.length / 3;
+					this.numTets = tetMesh.tetIds.length / 4;
+					this.pos = new Float32Array(tetMesh.verts);
+					this.prevPos = tetMesh.verts.slice();
+					this.vel = new Float32Array(3 * this.numParticles);
+
+					this.tetIds = tetMesh.tetIds;
+					this.edgeIds = tetMesh.tetEdgeIds;
+					this.restVol = new Float32Array(this.numTets);
+					this.edgeLengths = new Float32Array(this.edgeIds.length / 2);	
+					this.invMass = new Float32Array(this.numParticles);
+
+					this.edgeCompliance = edgeCompliance;
+					this.volCompliance = volCompliance;
+
+					this.temp = new Float32Array(4 * 3);
+					this.grads = new Float32Array(4 * 3);
+
+					this.grabId = -1;
+					this.grabInvMass = 0.0;
+					this.grabOffset = null;
+					this.oldInvMasses = null;
+
+					this.initPhysics();
+
+					var geometry = new THREE.BufferGeometry();
+					geometry.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
+					geometry.setIndex(tetMesh.tetSurfaceTriIds);
+					var material = new THREE.MeshPhongMaterial({color: 0xF02000});
+					material.flatShading = true;
+					this.surfaceMesh = new THREE.Mesh(geometry, material);
+					this.surfaceMesh.geometry.computeVertexNormals();
+					this.surfaceMesh.userData = this;
+					this.surfaceMesh.layers.enable(1);
+					scene.add(this.surfaceMesh);
+
+					this.volIdOrder = [[1,3,2], [0,2,3], [0,3,1], [0,1,2]];
+				}
+
+				translate(x, y, z) {
+					for (var i = 0; i < this.numParticles; i++) {
+						vecAdd(this.pos,i, [x,y,z],0);
+						vecAdd(this.prevPos,i, [x,y,z],0);
+					}
+				}
+
+				getBoundingBox() {
+					var minX = Infinity, minY = Infinity, minZ = Infinity;
+					var maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+
+					for (var i = 0; i < this.numParticles; i++) {
+						var x = this.pos[i * 3];
+						var y = this.pos[i * 3 + 1];
+						var z = this.pos[i * 3 + 2];
+
+						minX = Math.min(minX, x);
+						minY = Math.min(minY, y);
+						minZ = Math.min(minZ, z);
+						maxX = Math.max(maxX, x);
+						maxY = Math.max(maxY, y);
+						maxZ = Math.max(maxZ, z);
+					}
+
+					return {
+						min: { x: minX, y: minY, z: minZ },
+						max: { x: maxX, y: maxY, z: maxZ },
+						size: { x: maxX - minX, y: maxY - minY, z: maxZ - minZ }
+					};
+				}
+
+				normalizeToGround() {
+					var bbox = this.getBoundingBox();
+					var offsetY = -bbox.min.y;
+					
+					console.log("Mesh bounding box:", 
+						"min(" + bbox.min.x.toFixed(3) + "," + bbox.min.y.toFixed(3) + "," + bbox.min.z.toFixed(3) + ")",
+						"max(" + bbox.max.x.toFixed(3) + "," + bbox.max.y.toFixed(3) + "," + bbox.max.z.toFixed(3) + ")");
+					console.log("Applying Y offset:", offsetY.toFixed(3), "to normalize to ground");
+					
+					this.translate(0, offsetY, 0);
+					
+					var newBbox = this.getBoundingBox();
+					console.log("After normalization - bottom Y:", newBbox.min.y.toFixed(3));
+				}
+
+				updateMeshes() {
+					this.surfaceMesh.geometry.attributes.position.needsUpdate = true;
+					this.surfaceMesh.geometry.computeVertexNormals();
+					this.surfaceMesh.geometry.computeBoundingSphere();
+					
+					// Update anchor positions
+					gInteractionState.anchorPoints.forEach(anchor => {
+						if (anchor.softBody === this) {
+							anchor.updatePosition();
+						}
+					});
+				}
+
+				forceNormalUpdate() {
+					this.surfaceMesh.geometry.deleteAttribute('normal');
+					this.surfaceMesh.geometry.attributes.position.needsUpdate = true;
+					this.surfaceMesh.geometry.computeVertexNormals();
+					this.surfaceMesh.geometry.computeBoundingSphere();
+				}
+
+				getTetVolume(nr) {
+					var id0 = this.tetIds[4 * nr];
+					var id1 = this.tetIds[4 * nr + 1];
+					var id2 = this.tetIds[4 * nr + 2];
+					var id3 = this.tetIds[4 * nr + 3];
+					vecSetDiff(this.temp,0, this.pos,id1, this.pos,id0);
+					vecSetDiff(this.temp,1, this.pos,id2, this.pos,id0);
+					vecSetDiff(this.temp,2, this.pos,id3, this.pos,id0);
+					vecSetCross(this.temp,3, this.temp,0, this.temp,1);
+					return vecDot(this.temp,3, this.temp,2) / 6.0;
+				}
+
+				initPhysics() {
+					this.invMass.fill(0.0);
+					this.restVol.fill(0.0);
+
+					for (var i = 0; i < this.numTets; i++) {
+						var vol =this.getTetVolume(i);
+						this.restVol[i] = vol;
+						var pInvMass = vol > 0.0 ? 1.0 / (vol / 4.0) : 0.0;
+						this.invMass[this.tetIds[4 * i]] += pInvMass;
+						this.invMass[this.tetIds[4 * i + 1]] += pInvMass;
+						this.invMass[this.tetIds[4 * i + 2]] += pInvMass;
+						this.invMass[this.tetIds[4 * i + 3]] += pInvMass;
+					}
+					
+					this.oldInvMasses = new Float32Array(this.invMass);
+					
+					for (var i = 0; i < this.edgeLengths.length; i++) {
+						var id0 = this.edgeIds[2 * i];
+						var id1 = this.edgeIds[2 * i + 1];
+						this.edgeLengths[i] = Math.sqrt(vecDistSquared(this.pos,id0, this.pos,id1));
+					}
+				}
+
+				preSolve(dt, gravity) {
+					var groundDamping = 0.7;
+					
+					for (var i = 0; i < this.numParticles; i++) {
+						if (this.invMass[i] == 0.0)
+							continue;
+							
+						vecAdd(this.vel,i, gravity,0, dt);
+						vecCopy(this.prevPos,i, this.pos,i);
+						vecAdd(this.pos,i, this.vel,i, dt);
+						
+						var y = this.pos[3 * i + 1];
+						if (y < 0.0) {
+							vecCopy(this.pos,i, this.prevPos,i);
+							this.pos[3 * i + 1] = 0.0;
+							
+							this.vel[3 * i] *= groundDamping;
+							this.vel[3 * i + 1] *= -0.5 * groundDamping;
+							this.vel[3 * i + 2] *= groundDamping;
+						}
+					}
+				}
+
+				solve(dt) {
+					this.solveEdges(this.edgeCompliance, dt);
+					this.solveVolumes(this.volCompliance, dt);
+				}
+
+				postSolve(dt) {
+					var dampingFactor = 0.98;
+					
+					for (var i = 0; i < this.numParticles; i++) {
+						if (this.invMass[i] == 0.0)
+							continue;
+						
+						vecSetDiff(this.vel,i, this.pos,i, this.prevPos,i, 1.0 / dt);
+						
+						if (this.grabId !== i) {
+							vecScale(this.vel, i, dampingFactor);
+						}
+					}
+					this.updateMeshes();
+				}
+
+				solveEdges(compliance, dt) {
+					var alpha = compliance / dt /dt;
+
+					for (var i = 0; i < this.edgeLengths.length; i++) {
+						var id0 = this.edgeIds[2 * i];
+						var id1 = this.edgeIds[2 * i + 1];
+						var w0 = this.invMass[id0];
+						var w1 = this.invMass[id1];
+						var w = w0 + w1;
+						if (w == 0.0)
+							continue;
+
+						vecSetDiff(this.grads,0, this.pos,id0, this.pos,id1);
+						var len = Math.sqrt(vecLengthSquared(this.grads,0));
+						if (len == 0.0)
+							continue;
+						vecScale(this.grads,0, 1.0 / len);
+						var restLen = this.edgeLengths[i];
+						var C = len - restLen;
+						var s = -C / (w + alpha);
+						vecAdd(this.pos,id0, this.grads,0, s * w0);
+						vecAdd(this.pos,id1, this.grads,0, -s * w1);
+					}
+				}
+
+				solveVolumes(compliance, dt) {
+					var alpha = compliance / dt /dt;
+
+					for (var i = 0; i < this.numTets; i++) {
+						var w = 0.0;
+						
+						for (var j = 0; j < 4; j++) {
+							var id0 = this.tetIds[4 * i + this.volIdOrder[j][0]];
+							var id1 = this.tetIds[4 * i + this.volIdOrder[j][1]];
+							var id2 = this.tetIds[4 * i + this.volIdOrder[j][2]];
+
+							vecSetDiff(this.temp,0, this.pos,id1, this.pos,id0);
+							vecSetDiff(this.temp,1, this.pos,id2, this.pos,id0);
+							vecSetCross(this.grads,j, this.temp,0, this.temp,1);
+							vecScale(this.grads,j, 1.0/6.0);
+
+							w += this.invMass[this.tetIds[4 * i + j]] * vecLengthSquared(this.grads,j);
+						}
+						if (w == 0.0)
+							continue;
+
+						var vol = this.getTetVolume(i);
+						var restVol = this.restVol[i];
+						var C = vol - restVol;
+						var s = -C / (w + alpha);
+
+						for (var j = 0; j < 4; j++) {
+							var id = this.tetIds[4 * i + j];
+							vecAdd(this.pos,id, this.grads,j, s * this.invMass[id])
+						}
+					}
+				}
+
+				squash() {
+					for (var i = 0; i < this.numParticles; i++) {
+						this.pos[3 * i + 1] = 0.5;
+					}
+					this.updateMeshes();
+				}
+
+				startGrab(pos) {
+					var p = [pos.x, pos.y, pos.z];
+					var minD2 = Number.MAX_VALUE;
+					this.grabId = -1;
+					
+					for (let i = 0; i < this.numParticles; i++) {
+						var d2 = vecDistSquared(p,0, this.pos,i);
+						if (d2 < minD2) {
+							minD2 = d2;
+							this.grabId = i;
+						}
+					}
+
+					if (this.grabId >= 0) {
+						var particlePos = [
+							this.pos[this.grabId * 3],
+							this.pos[this.grabId * 3 + 1],
+							this.pos[this.grabId * 3 + 2]
+						];
+						
+						this.grabInvMass = this.invMass[this.grabId];
+						this.grabOffset = [
+							particlePos[0] - pos.x,
+							particlePos[1] - pos.y,
+							particlePos[2] - pos.z
+						];
+						
+						this.invMass[this.grabId] = 0.0;
+					}
+				}
+
+				moveGrabbed(pos, vel) {
+					if (this.grabId >= 0) {
+						this.pos[this.grabId * 3] = pos.x + this.grabOffset[0];
+						this.pos[this.grabId * 3 + 1] = pos.y + this.grabOffset[1];
+						this.pos[this.grabId * 3 + 2] = pos.z + this.grabOffset[2];
+					}
+				}
+
+				endGrab(pos, vel) {
+					if (this.grabId >= 0) {
+						this.invMass[this.grabId] = this.grabInvMass;
+						var dampingFactor = 0.3;
+						this.vel[this.grabId * 3] = vel.x * dampingFactor;
+						this.vel[this.grabId * 3 + 1] = vel.y * dampingFactor;
+						this.vel[this.grabId * 3 + 2] = vel.z * dampingFactor;
+					}
+					this.grabId = -1;
+				}
+
+				getMeshData() {
+					return {
+						verts: Array.from(this.pos),
+						tetIds: this.tetIds.slice(),
+						tetEdgeIds: this.edgeIds.slice(),
+						tetSurfaceTriIds: this.surfaceMesh.geometry.index.array.slice()
+					};
+				}
+
+				reinitializeMesh(newMeshData) {
+					this.tetIds = newMeshData.tetIds;
+					this.edgeIds = newMeshData.tetEdgeIds;
+					this.numTets = this.tetIds.length / 4;
+					
+					this.surfaceMesh.geometry.setIndex(newMeshData.tetSurfaceTriIds);
+					this.forceNormalUpdate();
+					this.initPhysics();
+					
+					console.log("Mesh reinitialized:", this.numTets, "tetrahedra");
+				}
+			}
+
+			// Utility functions
+			function findClosestVertex(softBody, worldPos) {
+				var minD2 = Number.MAX_VALUE;
+				var closestId = -1;
+				var p = [worldPos.x, worldPos.y, worldPos.z];
+				
+				for (let i = 0; i < softBody.numParticles; i++) {
+					var d2 = vecDistSquared(p, 0, softBody.pos, i);
+					if (d2 < minD2) {
+						minD2 = d2;
+						closestId = i;
+					}
+				}
+				return closestId;
+			}
+
+			function addAnchorPoint(worldPos) {
+				if (gInteractionState.anchorPoints.length >= 3) {
+					console.log("Maximum 3 anchor points allowed");
+					return false;
+				}
+				
+				if (gPhysicsScene.objects.length === 0) return false;
+				
+				var bunny = gPhysicsScene.objects[0];
+				var closestIndex = findClosestVertex(bunny, worldPos);
+				
+				if (closestIndex >= 0) {
+					var anchor = new AnchorPoint(worldPos, closestIndex, bunny);
+					gInteractionState.anchorPoints.push(anchor);
+					updateModeInfo();
+					return true;
+				}
+				return false;
+			}
+
+			function clearAllAnchors() {
+				gInteractionState.anchorPoints.forEach(anchor => {
+					anchor.remove();
+				});
+				gInteractionState.anchorPoints = [];
+				updateModeInfo();
+				console.log("All anchors cleared");
+			}
+
+			function switchMode(newMode) {
+				gInteractionState.currentMode = newMode;
+				
+				document.querySelectorAll('.mode-button').forEach(btn => {
+					btn.classList.remove('active');
+				});
+				
+				switch(newMode) {
+					case 'deform':
+						document.getElementById('modeDeform').classList.add('active');
+						document.getElementById('cutExecute').style.display = 'none';
+						if (gInteractionState.cutterObject) {
+							gInteractionState.cutterObject.setVisible(false);
+						}
+						break;
+						
+					case 'cut':
+						document.getElementById('modeCut').classList.add('active');
+						document.getElementById('cutExecute').style.display = 'inline-block';
+						if (gInteractionState.cutterObject) {
+							gInteractionState.cutterObject.setVisible(true);
+						}
+						break;
+						
+					case 'anchor':
+						document.getElementById('modeAnchor').classList.add('active');
+						document.getElementById('cutExecute').style.display = 'none';
+						if (gInteractionState.cutterObject) {
+							gInteractionState.cutterObject.setVisible(false);
+						}
+						break;
+				}
+				
+				updateModeInfo();
+				console.log("Switched to mode:", newMode);
+			}
+
+			function updateModeInfo() {
+				var modeText = gInteractionState.currentMode.charAt(0).toUpperCase() + 
+							   gInteractionState.currentMode.slice(1);
+				var anchorCount = gInteractionState.anchorPoints.length;
+				document.getElementById('modeInfo').innerHTML = 
+					'Mode: ' + modeText + ' | Anchors: ' + anchorCount + '/3';
+			}
+
+			function performCutWithAnchors() {
+				if (gPhysicsScene.objects.length === 0 || !gInteractionState.cutterObject) return;
+
+				var bunny = gPhysicsScene.objects[0];
+				
+				var savedAnchors = gInteractionState.anchorPoints.map(anchor => ({
+					particleIndex: anchor.particleIndex,
+					position: anchor.position.clone(),
+					originalInvMass: anchor.originalInvMass
+				}));
+				
+				console.log("Performing cut with", savedAnchors.length, "anchors to preserve");
+				
+				var cutterVerts = gInteractionState.cutterObject.getTransformedVerts();
+				var cutterMeshData = {
+					verts: cutterVerts,
+					tetIds: cutterMesh.tetIds,
+					tetEdgeIds: cutterMesh.tetEdgeIds,
+					tetSurfaceTriIds: cutterMesh.tetSurfaceTriIds
+				};
+
+				var targetMeshData = bunny.getMeshData();
+				var intersectingTets = MeshCutting.findIntersectingTetrahedra(cutterMeshData, targetMeshData);
+				
+				if (intersectingTets.length > 0) {
+					var newMesh = MeshCutting.cutTetrahedralMesh(targetMeshData, intersectingTets);
+					
+					clearAllAnchors();
+					bunny.reinitializeMesh(newMesh);
+					
+					savedAnchors.forEach(savedAnchor => {
+						var newIndex = findClosestVertex(bunny, savedAnchor.position);
+						if (newIndex >= 0) {
+							var anchor = new AnchorPoint(savedAnchor.position, newIndex, bunny);
+							gInteractionState.anchorPoints.push(anchor);
+						}
+					});
+					
+					var cutY = gInteractionState.cutterObject.position.y;
+					for (var i = 0; i < bunny.numParticles; i++) {
+						if (Math.abs(bunny.pos[i * 3 + 1] - cutY) < 0.15) {
+							bunny.vel[i * 3 + 1] += (bunny.pos[i * 3 + 1] > cutY ? 2.0 : -2.0);
+						}
+					}
+					
+					document.getElementById("numTets").innerHTML = bunny.numTets;
+					updateModeInfo();
+					
+					console.log("Cut complete with", gInteractionState.anchorPoints.length, "anchors restored");
+				}
+			}
+
+			function initPhysics() {
+				var body = new SoftBody(bunnyMesh, gThreeScene);
+				body.normalizeToGround();
+				
+				gPhysicsScene.objects.push(body); 
+				gInteractionState.bunnyMesh = body;
+				
+				document.getElementById("numTets").innerHTML = body.numTets;
+				console.log("Soft body initialized and normalized to ground level");
+			}
+
+			function simulate() {
+				if (gPhysicsScene.paused)
+					return;
+
+				var sdt = gPhysicsScene.dt / gPhysicsScene.numSubsteps;
+
+				for (var step = 0; step < gPhysicsScene.numSubsteps; step++) {
+					for (var i = 0; i < gPhysicsScene.objects.length; i++) 
+						gPhysicsScene.objects[i].preSolve(sdt, gPhysicsScene.gravity);
+					
+					for (var i = 0; i < gPhysicsScene.objects.length; i++) 
+						gPhysicsScene.objects[i].solve(sdt);
+
+					for (var i = 0; i < gPhysicsScene.objects.length; i++) 
+						gPhysicsScene.objects[i].postSolve(sdt);
+				}
+
+				gGrabber.increaseTime(gPhysicsScene.dt);
+			}
+					
+			function initThreeScene() {
+				gThreeScene = new THREE.Scene();
+				
+				gThreeScene.add( new THREE.AmbientLight( 0x505050 ) );	
+				gThreeScene.fog = new THREE.Fog( 0x000000, 0, 15 );				
+
+				var spotLight = new THREE.SpotLight( 0xffffff );
+				spotLight.angle = Math.PI / 5;
+				spotLight.penumbra = 0.2;
+				spotLight.position.set( 2, 3, 3 );
+				spotLight.castShadow = true;
+				spotLight.shadow.camera.near = 3;
+				spotLight.shadow.camera.far = 10;
+				spotLight.shadow.mapSize.width = 1024;
+				spotLight.shadow.mapSize.height = 1024;
+				gThreeScene.add( spotLight );
+
+				var dirLight = new THREE.DirectionalLight( 0x55505a, 1 );
+				dirLight.position.set( 0, 3, 0 );
+				dirLight.castShadow = true;
+				dirLight.shadow.camera.near = 1;
+				dirLight.shadow.camera.far = 10;
+				dirLight.shadow.camera.right = 1;
+				dirLight.shadow.camera.left = - 1;
+				dirLight.shadow.camera.top	= 1;
+				dirLight.shadow.camera.bottom = - 1;
+				dirLight.shadow.mapSize.width = 1024;
+				dirLight.shadow.mapSize.height = 1024;
+				gThreeScene.add( dirLight );
+				
+				var ground = new THREE.Mesh(
+					new THREE.PlaneBufferGeometry( 20, 20, 1, 1 ),
+					new THREE.MeshPhongMaterial( { color: 0xa0adaf, shininess: 150 } )
+				);				
+				ground.rotation.x = - Math.PI / 2;
+				ground.receiveShadow = true;
+				gThreeScene.add( ground );
+				
+				var helper = new THREE.GridHelper( 20, 20 );
+				helper.material.opacity = 1.0;
+				helper.material.transparent = true;
+				helper.position.set(0, 0.002, 0);
+				gThreeScene.add( helper );				
+				
+				gRenderer = new THREE.WebGLRenderer();
+				gRenderer.shadowMap.enabled = true;
+				gRenderer.setPixelRatio( window.devicePixelRatio );
+				gRenderer.setSize( 0.8 * window.innerWidth, 0.8 * window.innerHeight );
+				window.addEventListener( 'resize', onWindowResize, false );
+				container.appendChild( gRenderer.domElement );
+				
+				gCamera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 0.01, 100);
+			    gCamera.position.set(0, 2, 4);
+				gCamera.updateMatrixWorld();	
+				gThreeScene.add(gCamera);
+
+				gCameraControl = new THREE.OrbitControls(gCamera, gRenderer.domElement);
+				gCameraControl.zoomSpeed = 2.0;
+    			gCameraControl.panSpeed = 0.4;
+
+				gGrabber = new Grabber();
+				container.addEventListener( 'pointerdown', onPointer, false );
+				container.addEventListener( 'pointermove', onPointer, false );
+				container.addEventListener( 'pointerup', onPointer, false );
+			}
+
+			class Grabber {
+				constructor() {
+					this.raycaster = new THREE.Raycaster();
+					this.raycaster.layers.set(1);
+					this.physicsObject = null;
+					this.distance = 0.0;
+					this.prevPos = new THREE.Vector3();
+					this.vel = new THREE.Vector3();
+					this.time = 0.0;
+					this.mouseButtons = { left: false, right: false }; // Track mouse button state
+				}
+				
+				increaseTime(dt) {
+					this.time += dt;
+				}
+				
+				updateRaycaster(x, y) {
+					var rect = gRenderer.domElement.getBoundingClientRect();
+					this.mousePos = new THREE.Vector2();
+					this.mousePos.x = ((x - rect.left) / rect.width ) * 2 - 1;
+					this.mousePos.y = -((y - rect.top) / rect.height ) * 2 + 1;
+					this.raycaster.setFromCamera( this.mousePos, gCamera );
+				}
+				
+				start(x, y, button = 0) {
+					this.physicsObject = null;
+					this.updateRaycaster(x, y);
+					
+					// Update mouse button state
+					if (button === 0) this.mouseButtons.left = true;
+					if (button === 2) this.mouseButtons.right = true;
+					
+					var intersects = this.raycaster.intersectObjects( gThreeScene.children );
+					if (intersects.length > 0) {
+						
+						switch(gInteractionState.currentMode) {
+							case 'deform':
+								// Deform mode: prioritize anchors, then soft body
+								for (var i = 0; i < intersects.length; i++) {
+									var obj = intersects[i].object.userData;
+									if (obj && obj instanceof AnchorPoint) {
+										this.physicsObject = obj;
+										this.distance = intersects[i].distance;
+										
+										var worldHitPos = intersects[i].point.clone();
+										console.log("DEFORM: Grabbed anchor point");
+										
+										this.physicsObject.startGrab(worldHitPos);
+										this.prevPos.copy(worldHitPos);
+										this.vel.set(0.0, 0.0, 0.0);
+										this.time = 0.0;
+										break;
+									} else if (obj && obj instanceof SoftBody) {
+										this.physicsObject = obj;
+										this.distance = intersects[i].distance;
+										
+										var worldHitPos = intersects[i].point.clone();
+										console.log("DEFORM: Grabbed soft body");
+										
+										this.physicsObject.startGrab(worldHitPos);
+										this.prevPos.copy(worldHitPos);
+										this.vel.set(0.0, 0.0, 0.0);
+										this.time = 0.0;
+										
+										if (gPhysicsScene.paused) run();
+										break;
+									}
+								}
+								break;
+								
+							case 'cut':
+								for (var i = 0; i < intersects.length; i++) {
+									var obj = intersects[i].object.userData;
+									if (obj && obj instanceof CutterObject) {
+										this.physicsObject = obj;
+										this.distance = intersects[i].distance;
+										
+										var worldHitPos = intersects[i].point.clone();
+										
+										// Determine grab mode based on mouse buttons
+										var grabMode = 'translate';
+										if (this.mouseButtons.left && this.mouseButtons.right) {
+											grabMode = 'scale';
+											console.log("CUT: Both buttons - scaling mode");
+										} else if (this.mouseButtons.right) {
+											grabMode = 'rotate';
+											console.log("CUT: Right button - rotation mode");
+										} else {
+											console.log("CUT: Left button - translation mode");
+										}
+										
+										this.physicsObject.startGrab(worldHitPos, grabMode);
+										this.physicsObject.setInitialMousePos(this.mousePos);
+										this.prevPos.copy(worldHitPos);
+										this.vel.set(0.0, 0.0, 0.0);
+										this.time = 0.0;
+										break;
+									}
+								}
+								break;
+								
+							case 'anchor':
+								for (var i = 0; i < intersects.length; i++) {
+									var obj = intersects[i].object.userData;
+									if (obj && obj instanceof SoftBody) {
+										var worldHitPos = intersects[i].point.clone();
+										console.log("ANCHOR: Placing anchor");
+										addAnchorPoint(worldHitPos);
+										break;
+									}
+								}
+								break;
+						}
+					}
+				}
+				
+				move(x, y) {
+					if (this.physicsObject) {
+						this.updateRaycaster(x, y);
+						var pos = this.raycaster.ray.origin.clone();
+						pos.addScaledVector(this.raycaster.ray.direction, this.distance);
+
+						this.vel.copy(pos);
+						this.vel.sub(this.prevPos);
+						if (this.time > 0.0)
+							this.vel.divideScalar(this.time);
+						else
+							this.vel.set(0.0, 0.0, 0.0);
+						
+						this.vel.multiplyScalar(0.8);
+						this.prevPos.copy(pos);
+						this.time = 0.0;
+
+						// Pass mousePos for cutter transformation modes
+						if (this.physicsObject instanceof CutterObject) {
+							this.physicsObject.moveGrabbed(pos, this.vel, this.mousePos);
+						} else {
+							this.physicsObject.moveGrabbed(pos, this.vel);
+						}
+					}
+				}
+				
+				end(x, y, button = 0) {
+					// Update mouse button state
+					if (button === 0) this.mouseButtons.left = false;
+					if (button === 2) this.mouseButtons.right = false;
+					
+					if (this.physicsObject) { 
+						this.physicsObject.endGrab(this.prevPos, this.vel);
+						this.physicsObject = null;
+					}
+				}
+			}
+
+			// Enhanced mouse handling for multi-button support
+			var gMouseState = { 
+				down: false, 
+				leftDown: false, 
+				rightDown: false,
+				bothDown: false 
+			};
+
+			function onPointer( evt ) {
+				event.preventDefault();
+				
+				if (evt.type == "pointerdown") {
+					var button = evt.button || 0; // 0=left, 2=right
+					
+					if (button === 0) gMouseState.leftDown = true;
+					if (button === 2) gMouseState.rightDown = true;
+					gMouseState.bothDown = gMouseState.leftDown && gMouseState.rightDown;
+					
+					gGrabber.start(evt.clientX, evt.clientY, button);
+					gMouseState.down = true;
+					
+					if (gGrabber.physicsObject) {
+						gCameraControl.enabled = false;
+					}
+				}
+				else if (evt.type == "pointermove" && gMouseState.down) {
+					gGrabber.move(evt.clientX, evt.clientY);
+				}
+				else if (evt.type == "pointerup") {
+					var button = evt.button || 0;
+					
+					if (button === 0) gMouseState.leftDown = false;
+					if (button === 2) gMouseState.rightDown = false;
+					gMouseState.bothDown = gMouseState.leftDown && gMouseState.rightDown;
+					
+					if (gGrabber.physicsObject) {
+						gGrabber.end(evt.clientX, evt.clientY, button);
+						
+						// Only re-enable camera controls if no buttons are pressed
+						if (!gMouseState.leftDown && !gMouseState.rightDown) {
+							gCameraControl = new THREE.OrbitControls(gCamera, gRenderer.domElement);
+							gCameraControl.zoomSpeed = 2.0;
+							gCameraControl.panSpeed = 0.4;
+							gMouseState.down = false;
+						}
+					} else {
+						gMouseState.down = false;
+					}
+				}
+			}
+			
+			// Disable context menu for right-click functionality
+			document.addEventListener('contextmenu', function(e) {
+				e.preventDefault();
+			});	
+
+			document.getElementById("complianceSlider").oninput = function() {
+				for (var i = 0; i < gPhysicsScene.objects.length; i++) 
+					gPhysicsScene.objects[i].edgeCompliance = this.value * 50.0;
+			}
+
+			function handleKeyPress(event) {
+				switch(event.key.toLowerCase()) {
+					case 'c':
+						if (gInteractionState.currentMode === 'cut') {
+							performCutWithAnchors();
+						}
+						break;
+					case 'r':
+						restart();
+						break;
+					case 'm':
+						var modes = ['deform', 'cut', 'anchor'];
+						var currentIndex = modes.indexOf(gInteractionState.currentMode);
+						var nextMode = modes[(currentIndex + 1) % modes.length];
+						switchMode(nextMode);
+						break;
+					case 'a':
+						clearAllAnchors();
+						break;
+				}
+			}
+
+			function onWindowResize() {
+				gCamera.aspect = window.innerWidth / window.innerHeight;
+				gCamera.updateProjectionMatrix();
+				gRenderer.setSize( window.innerWidth, window.innerHeight );
+			}
+
+			function run() {
+				var button = document.getElementById('buttonRun');
+				if (gPhysicsScene.paused)
+					button.innerHTML = "Stop";
+				else
+					button.innerHTML = "Run";
+				gPhysicsScene.paused = !gPhysicsScene.paused;
+			}
+
+			function restart() {
+				location.reload();
+			}
+
+			function squash() {
+				for (var i = 0; i < gPhysicsScene.objects.length; i++)
+					gPhysicsScene.objects[i].squash();
+				if (!gPhysicsScene.paused)
+					run();
+			}
+
+			function newBody() {
+				body = new SoftBody(bunnyMesh, gThreeScene);
+				body.normalizeToGround();
+				body.translate(-1.0 + 2.0 * Math.random(), 0.0, -1.0 + 2.0 * Math.random());
+				gPhysicsScene.objects.push(body); 
+				
+				var numTets = 0;
+				for (var i = 0; i < gPhysicsScene.objects.length; i++)
+					numTets += gPhysicsScene.objects[i].numTets;
+				document.getElementById("numTets").innerHTML = numTets;
+			}
+
+			function update() {
+				simulate();
+				gRenderer.render(gThreeScene, gCamera);
+				requestAnimationFrame(update);
+			}
+			
+			var bunnyMesh = {
+				name : "bunnyTets",
+                verts: [-0.260559,-0.260559,-1.302795,0.000000,-0.260559,-1.302795,-0.260559,0.000000,-1.302795,0.000000,0.000000,-1.302795,-0.260559,-0.260559,-1.042236,0.000000,-0.260559,-1.042236,-0.260559,0.000000,-1.042236,0.000000,0.000000,-1.042236,0.260559,-0.260559,-1.302795,0.260559,0.000000,-1.302795,0.260559,-0.260559,-1.042236,0.260559,0.000000,-1.042236,-0.260559,0.260559,-1.302795,0.000000,0.260559,-1.302795,-0.260559,0.260559,-1.042236,0.000000,0.260559,-1.042236,0.260559,0.260559,-1.302795,0.260559,0.260559,-1.042236,-0.260559,-0.260559,-0.781677,0.000000,-0.260559,-0.781677,-0.260559,0.000000,-0.781677,0.000000,0.000000,-0.781677,0.260559,-0.260559,-0.781677,0.260559,0.000000,-0.781677,-0.260559,0.260559,-0.781677,0.000000,0.260559,-0.781677,0.260559,0.260559,-0.781677,-0.260559,-0.260559,-0.521118,0.000000,-0.260559,-0.521118,-0.260559,0.000000,-0.521118,0.000000,0.000000,-0.521118,0.260559,-0.260559,-0.521118,0.260559,0.000000,-0.521118,-0.260559,0.260559,-0.521118,0.000000,0.260559,-0.521118,0.260559,0.260559,-0.521118,-0.260559,-0.260559,-0.260559,0.000000,-0.260559,-0.260559,-0.260559,0.000000,-0.260559,0.000000,0.000000,-0.260559,0.260559,-0.260559,-0.260559,0.260559,0.000000,-0.260559,-0.260559,0.260559,-0.260559,0.000000,0.260559,-0.260559,0.260559,0.260559,-0.260559,-0.260559,-0.260559,0.000000,0.000000,-0.260559,0.000000,-0.260559,0.000000,0.000000,0.000000,0.000000,0.000000,0.260559,-0.260559,0.000000,0.260559,0.000000,0.000000,-0.260559,0.260559,0.000000,0.000000,0.260559,0.000000,0.260559,0.260559,0.000000,-0.260559,-0.260559,0.260559,0.000000,-0.260559,0.260559,-0.260559,0.000000,0.260559,0.000000,0.000000,0.260559,0.260559,-0.260559,0.260559,0.260559,0.000000,0.260559,-0.260559,0.260559,0.260559,0.000000,0.260559,0.260559,0.260559,0.260559,0.260559,-0.260559,-0.260559,0.521118,0.000000,-0.260559,0.521118,-0.260559,0.000000,0.521118,0.000000,0.000000,0.521118,0.260559,-0.260559,0.521118,0.260559,0.000000,0.521118,-0.260559,0.260559,0.521118,0.000000,0.260559,0.521118,0.260559,0.260559,0.521118,-0.260559,-0.260559,0.781677,0.000000,-0.260559,0.781677,-0.260559,0.000000,0.781677,0.000000,0.000000,0.781677,0.260559,-0.260559,0.781677,0.260559,0.000000,0.781677,-0.260559,0.260559,0.781677,0.000000,0.260559,0.781677,0.260559,0.260559,0.781677,-0.260559,-0.260559,1.042236,0.000000,-0.260559,1.042236,-0.260559,0.000000,1.042236,0.000000,0.000000,1.042236,0.260559,-0.260559,1.042236,0.260559,0.000000,1.042236,-0.260559,0.260559,1.042236,0.000000,0.260559,1.042236,0.260559,0.260559,1.042236,-0.260559,-0.260559,1.302795,0.000000,-0.260559,1.302795,-0.260559,0.000000,1.302795,0.000000,0.000000,1.302795,0.260559,-0.260559,1.302795,0.260559,0.000000,1.302795,-0.260559,0.260559,1.302795,0.000000,0.260559,1.302795,0.260559,0.260559,1.302795],
+                tetIds: [0,1,3,5,0,3,2,6,0,4,5,6,3,5,7,6,0,5,3,6,1,8,3,5,8,9,3,11,8,3,5,11,8,5,10,11,3,5,11,7,2,3,12,6,3,13,12,15,3,12,6,15,3,6,7,15,12,6,15,14,81,82,83,90,82,84,83,93,82,83,90,93,82,90,91,93,83,90,93,92,82,85,86,94,82,86,84,93,82,91,94,93,86,94,95,93,82,94,86,93,83,84,88,93,83,88,87,96,83,92,93,96,88,93,97,96,83,93,88,96,84,86,88,93,86,89,88,98,86,88,93,98,86,93,95,98,88,93,98,97,54,55,57,64,54,57,56,65,54,63,64,65,57,64,66,65,54,64,57,65,38,39,42,47,39,43,42,52,39,42,47,52,39,47,48,52,42,47,52,51,55,58,57,64,58,59,57,68,58,57,64,68,58,64,67,68,57,64,68,66,63,64,65,72,64,66,65,75,64,65,72,75,64,72,73,75,65,72,75,74,46,49,50,58,46,50,48,57,46,55,58,57,50,58,59,57,46,58,50,57,65,66,70,75,65,70,69,78,65,74,75,78,70,75,79,78,65,75,70,78,39,41,44,50,39,44,43,52,39,48,50,52,44,50,53,52,39,50,44,52,64,67,68,76,64,68,66,75,64,73,76,75,68,76,77,75,64,76,68,75,47,48,52,57,47,52,51,60,47,56,57,60,52,57,61,60,47,57,52,60,66,68,70,75,68,71,70,80,68,70,75,80,68,75,77,80,70,75,80,79,45,46,47,54,46,48,47,57,46,47,54,57,46,54,55,57,47,54,57,56,48,50,52,57,50,53,52,62,50,52,57,62,50,57,59,62,52,57,62,61,30,32,34,39,32,35,34,44,32,34,39,44,32,39,41,44,34,39,44,43,36,37,39,46,36,39,38,47,36,45,46,47,39,46,48,47,36,46,39,47,37,40,39,46,40,41,39,50,40,39,46,50,40,46,49,50,39,46,50,48,3,9,16,11,3,16,13,15,3,7,11,15,16,11,17,15,3,11,16,15,4,5,6,18,5,7,6,21,5,6,18,21,5,18,19,21,6,18,21,20,5,10,11,22,5,11,7,21,5,19,22,21,11,22,23,21,5,22,11,21,72,73,75,82,72,75,74,83,72,81,82,83,75,82,84,83,72,82,75,83,73,76,75,82,76,77,75,86,76,75,82,86,76,82,85,86,75,82,86,84,19,22,21,28,22,23,21,32,22,21,28,32,22,28,31,32,21,28,32,30,20,21,24,29,21,25,24,34,21,24,29,34,21,29,30,34,24,29,34,33,21,23,26,32,21,26,25,34,21,30,32,34,26,32,35,34,21,32,26,34,74,75,78,83,75,79,78,88,75,78,83,88,75,83,84,88,78,83,88,87,75,77,80,86,75,80,79,88,75,84,86,88,80,86,89,88,75,86,80,88,27,28,29,36,28,30,29,39,28,29,36,39,28,36,37,39,29,36,39,38,28,31,32,40,28,32,30,39,28,37,40,39,32,40,41,39,28,40,32,39,29,30,34,39,29,34,33,42,29,38,39,42,34,39,43,42,29,39,34,42,6,7,15,21,6,15,14,24,6,20,21,24,15,21,25,24,6,21,15,24,7,11,15,21,11,17,15,26,11,15,21,26,11,21,23,26,15,21,26,25,18,19,21,28,18,21,20,29,18,27,28,29,21,28,30,29,18,28,21,29,56,57,60,65,57,61,60,70,57,60,65,70,57,65,66,70,60,65,70,69,57,59,62,68,57,62,61,70,57,66,68,70,62,68,71,70,57,68,62,70],
+                tetEdgeIds: [0,1,0,2,0,3,0,4,0,5,0,6,1,3,1,5,1,8,2,3,2,6,2,12,3,5,3,6,3,7,3,8,3,9,3,11,3,12,3,13,3,15,3,16,4,5,4,6,4,18,5,6,5,7,5,8,5,10,5,11,5,18,5,19,5,21,5,22,6,7,6,12,6,14,6,15,6,18,6,20,6,21,6,24,7,11,7,15,7,21,8,9,8,10,8,11,9,11,9,16,10,11,10,22,11,15,11,16,11,17,11,21,11,22,11,23,11,26,12,13,12,14,12,15,13,15,13,16,14,15,14,24,15,16,15,17,15,21,15,24,15,25,15,26,16,17,17,26,18,19,18,20,18,21,18,27,18,28,18,29,19,21,19,22,19,28,20,21,20,24,20,29,21,22,21,23,21,24,21,25,21,26,21,28,21,29,21,30,21,32,21,34,22,23,22,28,22,31,22,32,23,26,23,32,24,25,24,29,24,33,24,34,25,26,25,34,26,32,26,34,26,35,27,28,27,29,27,36,28,29,28,30,28,31,28,32,28,36,28,37,28,39,28,40,29,30,29,33,29,34,29,36,29,38,29,39,29,42,30,32,30,34,30,39,31,32,31,40,32,34,32,35,32,39,32,40,32,41,32,44,33,34,33,42,34,35,34,39,34,42,34,43,34,44,35,44,36,37,36,38,36,39,36,45,36,46,36,47,37,39,37,40,37,46,38,39,38,42,38,47,39,40,39,41,39,42,39,43,39,44,39,46,39,47,39,48,39,50,39,52,40,41,40,46,40,49,40,50,41,44,41,50,42,43,42,47,42,51,42,52,43,44,43,52,44,50,44,52,44,53,45,46,45,47,45,54,46,47,46,48,46,49,46,50,46,54,46,55,46,57,46,58,47,48,47,51,47,52,47,54,47,56,47,57,47,60,48,50,48,52,48,57,49,50,49,58,50,52,50,53,50,57,50,58,50,59,50,62,51,52,51,60,52,53,52,57,52,60,52,61,52,62,53,62,54,55,54,56,54,57,54,63,54,64,54,65,55,57,55,58,55,64,56,57,56,60,56,65,57,58,57,59,57,60,57,61,57,62,57,64,57,65,57,66,57,68,57,70,58,59,58,64,58,67,58,68,59,62,59,68,60,61,60,65,60,69,60,70,61,62,61,70,62,68,62,70,62,71,63,64,63,65,63,72,64,65,64,66,64,67,64,68,64,72,64,73,64,75,64,76,65,66,65,69,65,70,65,72,65,74,65,75,65,78,66,68,66,70,66,75,67,68,67,76,68,70,68,71,68,75,68,76,68,77,68,80,69,70,69,78,70,71,70,75,70,78,70,79,70,80,71,80,72,73,72,74,72,75,72,81,72,82,72,83,73,75,73,76,73,82,74,75,74,78,74,83,75,76,75,77,75,78,75,79,75,80,75,82,75,83,75,84,75,86,75,88,76,77,76,82,76,85,76,86,77,80,77,86,78,79,78,83,78,87,78,88,79,80,79,88,80,86,80,88,80,89,81,82,81,83,81,90,82,83,82,84,82,85,82,86,82,90,82,91,82,93,82,94,83,84,83,87,83,88,83,90,83,92,83,93,83,96,84,86,84,88,84,93,85,86,85,94,86,88,86,89,86,93,86,94,86,95,86,98,87,88,87,96,88,89,88,93,88,96,88,97,88,98,89,98,90,91,90,92,90,93,91,93,91,94,92,93,92,96,93,94,93,95,93,96,93,97,93,98,94,95,95,98,96,97,97,98],
+                tetSurfaceTriIds: [61,70,62,60,69,70,18,27,29,18,29,20,15,24,25,6,20,24,14,24,15,60,70,61,29,42,33,62,70,71,29,36,38,28,37,36,32,41,40,27,28,36,77,80,86,78,88,79,74,83,78,26,35,32,25,34,26,24,33,34,24,29,33,27,36,29,20,29,24,22,32,31,22,31,28,76,85,82,23,26,32,76,77,86,73,76,82,11,26,23,18,19,28,72,81,83,72,82,81,72,83,74,5,22,19,5,10,22,28,31,40,4,18,6,4,5,18,3,13,16,40,50,49,40,49,46,56,65,60,37,40,46,36,45,47,72,73,82,36,37,46,29,38,42,76,86,85,32,44,41,59,62,68,34,44,35,60,65,69,52,61,62,38,47,42,46,49,58,2,6,12,54,55,64,62,71,68,54,64,63,6,18,20,34,43,44,83,92,96,34,42,43,87,96,88,81,90,83,51,60,52,32,35,44,83,96,87,40,41,50,82,94,91,0,6,2,0,4,6,18,28,27,70,78,79,9,16,11,85,86,94,82,85,94,44,52,53,63,72,65,78,87,88,58,59,68,15,26,17,91,94,93,8,11,10,0,3,1,93,95,98,1,8,5,90,91,93,88,98,89,78,83,87,92,93,96,15,17,16,47,60,51,3,16,9,1,3,8,63,64,72,47,56,60,36,47,38,0,1,5,80,89,86,52,60,61,11,16,17,86,98,95,8,9,11,0,2,3,11,17,26,90,93,92,70,79,80,46,55,54,0,5,4,82,91,90,81,82,90,83,90,92,5,8,10,3,9,8,2,12,3,86,89,98,3,12,13,42,52,43,12,15,13,50,59,58,54,65,56,12,14,15,6,24,14,11,23,22,6,14,12,19,22,28,88,97,98,31,32,40,22,23,32,93,94,95,42,47,51,42,51,52,36,46,45,58,67,64,93,98,97,58,68,67,33,42,34,80,88,89,68,71,80,15,25,26,70,80,71,93,97,96,64,73,72,86,95,94,68,77,76,28,40,37,64,67,76,49,50,58,67,68,76,88,96,97,44,53,50,46,58,55,68,80,77,50,62,59,65,78,69,69,78,70,65,74,78,41,44,50,54,63,65,43,52,44,45,46,54,13,15,16,64,76,73,10,11,22,26,34,35,55,58,64,47,54,56,79,88,80,24,34,25,5,19,18,45,54,47,50,53,62,65,72,74,52,62,53]
+			};
+
+			var cutterMesh = {
+				name : "cutterTets",
+                verts: [-1.100000, -1.100000, -1.100000, 1.100000, -1.100000, -1.100000,
+                    -1.100000, 1.100000, -1.100000, 1.100000, 1.100000, -1.100000,
+                    -1.100000, -1.100000, 1.100000, 1.100000, -1.100000, 1.100000,
+                    -1.100000, 1.100000, 1.100000, 1.100000, 1.100000, 1.100000],
+                tetIds: [0, 1, 2, 4, 1, 3, 2, 7,1, 2, 4, 7, 1, 4, 5, 7,2, 4, 7, 6],
+                tetEdgeIds: [0, 1, 0, 2, 0, 4, 1, 2, 1, 3, 1, 4, 1, 5,1, 7, 2, 3, 2, 4, 2, 6, 2, 7, 3, 7, 4, 5,4, 6, 4, 7, 5, 7, 6, 7],
+                tetSurfaceTriIds: [4, 7, 6, 2, 6, 7, 0, 2, 1,0, 4, 2, 2, 7, 3, 1, 5, 4,0, 1, 4, 1, 3, 7, 1, 2, 3,2, 4, 6, 1, 7, 5, 4, 5, 7]
+			};
+
+			document.addEventListener('keydown', handleKeyPress);
+
+			initThreeScene();
+			onWindowResize();
+			initPhysics();
+			
+			// Initialize cutter object
+			gInteractionState.cutterObject = new CutterObject();
+			gInteractionState.cutterObject.setVisible(false); // Hidden in deform mode initially
+			
+			updateModeInfo();
+			update();
+			
+		</script>
+	</body>
+</html>
